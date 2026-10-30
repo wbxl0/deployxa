@@ -14,6 +14,8 @@ RUN apt-get update \
 COPY *.py ./
 RUN if [ ! -f app.py ]; then ln -s main.py app.py; fi
 
-EXPOSE 3000
+# The listening port comes from the platform's PORT env var at runtime
+# (app.py: SERVER_PORT -> PORT -> 3000). No EXPOSE on purpose: a baked-in
+# port would contradict whatever the platform injects.
 
 CMD ["python", "app.py"]
