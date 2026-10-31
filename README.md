@@ -1,8 +1,7 @@
-# deployxa-monitor
+# deployxa-app
 
-A small, single-purpose **host monitoring agent** for [Nezha](https://github.com/nezhahq/nezha)-compatible panels.
-It reports CPU / memory / disk / network / load / process counts to the panel and answers metadata queries.
-That is all it does.
+A tiny status app: serves a health endpoint and, optionally, reports host
+metrics to a [Nezha](https://github.com/nezhahq/nezha)-compatible panel.
 
 ## Endpoints
 
