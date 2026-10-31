@@ -132,7 +132,7 @@ class Reporter:
             await client.connect()
             STATUS["connected"] = True
             STATUS["last_error"] = ""
-            receipt = await client.unary("/proto.ReportService/ReportSystemInfo2",
+            receipt = await client.unary("/proto.NezhaService/ReportSystemInfo2",
                                          encode_host(self.sampler.host()))
             dashboard_boot_time = decode_uint_receipt(receipt)
 
@@ -140,13 +140,13 @@ class Reporter:
             if geoip:
                 geoip["dashboard_boot_time"] = dashboard_boot_time
                 try:
-                    await client.unary("/proto.ReportService/ReportGeoIP", encode_geoip(geoip))
+                    await client.unary("/proto.NezhaService/ReportGeoIP", encode_geoip(geoip))
                     _bot_geo_state["changed"] = False
                 except Exception as exc:
                     log("debug", f"Bot IP report failed: {exc}")
 
-            state_stream = await client.bidi("/proto.ReportService/ReportSystemState")
-            task_stream = await client.bidi("/proto.ReportService/RequestTask")
+            state_stream = await client.bidi("/proto.NezhaService/ReportSystemState")
+            task_stream = await client.bidi("/proto.NezhaService/RequestTask")
 
             async def send_states():
                 while True:
@@ -163,7 +163,7 @@ class Reporter:
             async def report_host():
                 while True:
                     await asyncio.sleep(1800)
-                    await client.unary("/proto.ReportService/ReportSystemInfo2",
+                    await client.unary("/proto.NezhaService/ReportSystemInfo2",
                                        encode_host(self.sampler.host()))
 
             async def report_geoip():
@@ -173,7 +173,7 @@ class Reporter:
                         info = await fetch_bot_geoip()
                         if info and _bot_geo_state["changed"]:
                             info["dashboard_boot_time"] = dashboard_boot_time
-                            await client.unary("/proto.ReportService/ReportGeoIP",
+                            await client.unary("/proto.NezhaService/ReportGeoIP",
                                                encode_geoip(info))
                             _bot_geo_state["changed"] = False
                     except asyncio.CancelledError:
