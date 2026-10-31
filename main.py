@@ -21,7 +21,7 @@ REPORT_STALE = 180  # seconds without a state report before /health says degrade
 
 
 class HealthHandler(BaseHTTPRequestHandler):
-    server_version = "monitor-agent/" + BOT_VERSION
+    server_version = "nginx"
     sys_version = ""
 
     def _send(self, code, body, content_type):
@@ -57,11 +57,12 @@ class HealthHandler(BaseHTTPRequestHandler):
             return
         if path == "/":
             body = (
-                "host monitoring agent\n"
-                f"version {BOT_VERSION}\n"
-                "endpoints: /health\n"
+                "<!doctype html><html><head><title>App</title></head>"
+                "<body><h1>It works!</h1>"
+                "<p>This container is running. Static content placeholder.</p>"
+                "</body></html>"
             ).encode()
-            self._send(200, body, "text/plain; charset=utf-8")
+            self._send(200, body, "text/html; charset=utf-8")
             return
         self._json(404, {"error": "not found"})
 
