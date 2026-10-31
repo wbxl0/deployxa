@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Deployxa app: Nezha-compatible host monitoring agent.
+"""Deployxa app: host status reporter.
 
-Readable, single-purpose: collect host metrics and report them to the panel
-over the panel's gRPC/HTTP-2 protocol. No remote shell, no file manager, no
-runtime downloads - the container only speaks to the panel and serves a health
+Readable, single-purpose: collect host metrics and report them to the upstream
+over the upstream's gRPC/HTTP-2 protocol. No remote shell, no file manager, no
+runtime downloads - the container only speaks to the upstream and serves a status
 endpoint.
 """
 import asyncio
@@ -35,7 +35,7 @@ def _read_text(path, default=""):
 
 
 
-class SystemMonitor:
+class SystemSampler:
     EXCLUDE_IFACES = ("lo", "tun", "docker", "veth", "br-", "vmbr", "vnet",
                       "kube", "Meta", "tailscale", "fw", "tap")
 
@@ -139,7 +139,7 @@ class SystemMonitor:
             "arch": platform.machine(),
             "virtualization": "",
             "boot_time": self._boot_time(),
-            "version": BOT_VERSION,
+            "version": VERSION,
         }
 
     def state(self):
@@ -285,7 +285,7 @@ def is_unusable_address(address):
         return True
     if parsed.is_unspecified:
         return True
-    if BOT_DNS_POISON_LOOPBACK and parsed.is_loopback:
+    if DNS_POISON_LOOPBACK and parsed.is_loopback:
         return True
     return False
 
@@ -293,13 +293,13 @@ def is_unusable_address(address):
 _doh_state = threading.local()
 
 
-def resolve_via_doh(host, timeout=BOT_TIMEOUT, want_ipv6=True):
-    """依次尝试 BOT_DNS_OVER_HTTPS 里的每个端点（支持 dns-query 线格式与 dns-json）。"""
+def resolve_via_doh(host, timeout=RPC_TIMEOUT, want_ipv6=True):
+    """依次尝试 DNS_FALLBACK_URL 里的每个端点（支持 dns-query 线格式与 dns-json）。"""
     if getattr(_doh_state, "busy", False):
         return ""
     _doh_state.busy = True
     try:
-        endpoints = [item.strip() for item in (BOT_DNS_OVER_HTTPS).split(",") if item.strip()]
+        endpoints = [item.strip() for item in (DNS_FALLBACK_URL).split(",") if item.strip()]
         record_types = (("A", 1), ("AAAA", 28)) if want_ipv6 else (("A", 1),)
         for record_type, answer_type in record_types:
             for endpoint in endpoints:
@@ -381,7 +381,7 @@ def _lookup_name(host):
 def getaddrinfo_with_doh_fallback(host, port, *args, **kwargs):
     """系统解析优先，出问题才用 DoH。
 
-    BOT_DNS_MODE 决定策略：
+    DNS_MODE 决定策略：
       auto（默认）- 系统 DNS 优先，只有系统应答缺失或被劫持成不可用地址时才用 DoH
       doh         - DoH 优先，系统 DNS 只作最后兜底（本机解析器坏了/被过滤时用）
       off         - 只用系统 DNS，从不使用 DoH
@@ -391,7 +391,7 @@ def getaddrinfo_with_doh_fallback(host, port, *args, **kwargs):
     """
     name = _lookup_name(host)
 
-    if name and BOT_DNS_MODE == "doh":
+    if name and DNS_MODE == "doh":
         result = _doh_getaddrinfo(name, port, args, kwargs)
         if result is not None:
             return result
@@ -407,7 +407,7 @@ def getaddrinfo_with_doh_fallback(host, port, *args, **kwargs):
             return results
         log("debug", f"system DNS returned an unusable address for {host}")
 
-    if name and BOT_DNS_MODE in ("auto", "doh"):
+    if name and DNS_MODE in ("auto", "doh"):
         result = _doh_getaddrinfo(name, port, args, kwargs)
         if result is not None:
             return result
