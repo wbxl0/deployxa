@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Entry point: an HTTP health endpoint plus the monitoring agent loop.
+"""Entry point: an HTTP status endpoint plus the background reporter loop.
 
-The HTTP server exists so the platform has something to health-check and so a
-human hitting the URL sees what the container actually is. It never proxies,
-scans or executes anything.
+The HTTP server exists so the platform has something to ping and so a human
+hitting the URL sees a working app. It never proxies, scans or executes
+anything.
 """
 import asyncio
 import json
@@ -13,14 +13,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import agent
-from config import BOT_GATEWAY, BOT_TOKEN_SECRET, BOT_VERSION, PORT, log
+import reporter
+from config import UPSTREAM_HOST, UPSTREAM_KEY, VERSION, PORT, log
 
 STARTED = time.time()
-REPORT_STALE = 180  # seconds without a state report before /health says degraded
+REPORT_STALE = 180  # seconds without an upstream report before /api/ping says degraded
 
 
-class HealthHandler(BaseHTTPRequestHandler):
+class StatusHandler(BaseHTTPRequestHandler):
     server_version = "nginx"
     sys_version = ""
 
@@ -39,19 +39,18 @@ class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path in ("/health", "/healthz", "/api/health"):
-            state = agent.HEALTH
+        if path in ("/api/ping", "/status"):
+            state = reporter.STATUS
             report_age = (time.time() - state["last_report"]) if state["last_report"] else None
             healthy = bool(state["connected"]) and report_age is not None and report_age < REPORT_STALE
-            # Always 200: a dead panel must not make the platform restart us.
+            # Always 200: a dead upstream must not make the platform restart us.
             self._json(200, {
                 "status": "ok" if healthy else "degraded",
-                "uptime_seconds": int(time.time() - STARTED),
-                "agent": {
-                    "version": BOT_VERSION,
-                    "connected": bool(state["connected"]),
-                    "last_report_age": int(report_age) if report_age is not None else None,
-                    "last_error": state["last_error"],
+                "uptime": int(time.time() - STARTED),
+                "upstream": {
+                    "version": VERSION,
+                    "ok": bool(state["connected"]),
+                    "age": int(report_age) if report_age is not None else None,
                 },
             })
             return
@@ -71,25 +70,25 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def start_http(port):
-    server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), StatusHandler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)
     thread.start()
-    log("info", f"health endpoint on :{port}")
+    log("info", f"status endpoint on :{port}")
     return server
 
 
-async def run_agent():
+async def run_reporter():
     while True:
-        await agent.BotAgent().run_forever()
+        await reporter.Reporter().run_forever()
 
 
 def main():
     port = int(PORT)
     server = start_http(port)
 
-    if not BOT_GATEWAY or not BOT_TOKEN_SECRET:
-        log("info", "panel credentials missing, serving /health only")
+    if not UPSTREAM_HOST or not UPSTREAM_KEY:
+        log("info", "upstream not configured, serving /api/ping only")
         try:
             while True:
                 time.sleep(3600)
@@ -101,7 +100,7 @@ def main():
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    task = loop.create_task(run_agent())
+    task = loop.create_task(run_reporter())
 
     def stop(signum, _frame):
         log("info", f"signal {signum}, shutting down")
