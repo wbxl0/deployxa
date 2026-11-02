@@ -103,7 +103,7 @@ class Reporter:
         self.sessions = set()
 
     async def run_forever(self):
-        retry_delay = RETRY_DELAY
+        failures = 0
         while True:
             started = time.monotonic()
             error = None
@@ -114,14 +114,25 @@ class Reporter:
             except Exception as exc:
                 error = exc
             uptime = time.monotonic() - started
-            if uptime >= 60:
-                retry_delay = RETRY_DELAY
-                log("debug", "Bot connection recycled, reconnecting")
+            if error is None:
+                # run_once does not return on its own; be defensive anyway.
+                failures = 0
+                retry_delay = RETRY_WAIT
+            elif uptime >= STABLE_SECS:
+                # The link was fine for a while, so this is a fresh drop rather
+                # than a connect storm: retry at once instead of escalating.
+                failures = 1
+                retry_delay = RETRY_WAIT
+                STATUS["last_error"] = f"{type(error).__name__}: {error}"
+                log("warn", f"session ended after {uptime:.0f}s "
+                            f"({type(error).__name__}: {error}); reopening in {retry_delay}s")
             else:
-                STATUS["last_error"] = f"{type(error).__name__}: {error}" if error else ""
-                log("debug", f"Bot reconnect in {retry_delay}s: {error}")
+                failures += 1
+                retry_delay = min(RECONNECT_COOLDOWN, RETRY_WAIT * (2 ** (failures - 1)))
+                STATUS["last_error"] = f"{type(error).__name__}: {error}"
+                log("warn", f"session failed after {uptime:.0f}s "
+                            f"({type(error).__name__}: {error}); retry #{failures} in {retry_delay}s")
             await asyncio.sleep(retry_delay)
-            retry_delay = min(RECONNECT_COOLDOWN, retry_delay * 2)
 
     async def run_once(self):
         client = GrpcClient(UPSTREAM_HOST)

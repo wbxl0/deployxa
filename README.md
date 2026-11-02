@@ -25,7 +25,13 @@ restart-loop the container; read the `status` field instead.
 | `IP_PERIOD` | `1800` | seconds between public-IP refreshes |
 | `DNS_MODE` | `off` | `off` / `auto` / `doh` |
 | `INSECURE_TLS` | `false` | skip TLS verification (only for self-signed upstreams) |
-| `LOG_LEVEL` | `none` | `debug` / `info` / `warn` / `error` |
+| `SYNC_INTERVAL` | `20` | seconds between keepalive frames |
+| `SYNC_TIMEOUT` | `40` | seconds to wait for each keepalive reply |
+| `SYNC_RETRIES` | `2` | consecutive missing replies before reconnecting |
+| `IO_TIMEOUT` | `150` | seconds without any frame before reconnecting |
+| `RETRY_WAIT` | `10` | first reconnect delay (doubles per failed attempt) |
+| `STABLE_SECS` | `60` | a link older than this counts as healthy, so a drop retries fast |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` / `none` |
 
 ## Layout
 

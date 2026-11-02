@@ -247,7 +247,10 @@ class H2Connection:
         self.next_stream_id = 1
         self.streams = {}
         self.reader_task = None
-        self.ping_task = None
+        self.keepalive_task = None
+        self.keepalive_seq = 0
+        self.pending_keepalive = None
+        self.keepalive_acked = asyncio.Event()
         self.write_lock = asyncio.Lock()
         self.connection_window = 65535
         self.initial_stream_window = 65535
@@ -278,15 +281,33 @@ class H2Connection:
         self.writer.write(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
         await self.send_frame(self.FRAME_SETTINGS, 0, 0, b"")
         self.reader_task = asyncio.create_task(self._reader_loop())
-        self.ping_task = asyncio.create_task(self._ping_loop())
+        self.keepalive_task = asyncio.create_task(self._keepalive_loop())
 
-    async def _ping_loop(self):
-        counter = 0
+    async def _keepalive_loop(self):
+        """Keep the session warm and prove the peer is still listening.
+
+        A write into a dropped socket succeeds silently, so the reply is the
+        only proof the session is alive. Consecutive misses reset the session so
+        the reporter can reopen it.
+        """
+        misses = 0
         try:
             while True:
-                await asyncio.sleep(PING_INTERVAL)
-                counter = (counter + 1) & 0xFFFFFFFFFFFFFFFF
-                await self.send_frame(self.FRAME_PING, 0, 0, struct.pack("!Q", counter))
+                await asyncio.sleep(SYNC_INTERVAL)
+                if self.writer is None:
+                    raise H2Error("connection closed")
+                self.keepalive_seq = (self.keepalive_seq + 1) & 0xFFFFFFFFFFFFFFFF
+                self.pending_keepalive = self.keepalive_seq
+                self.keepalive_acked.clear()
+                await self.send_frame(self.FRAME_PING, 0, 0, struct.pack("!Q", self.keepalive_seq))
+                try:
+                    await asyncio.wait_for(self.keepalive_acked.wait(), timeout=SYNC_TIMEOUT)
+                    misses = 0
+                except asyncio.TimeoutError:
+                    misses += 1
+                    if misses >= SYNC_RETRIES:
+                        raise H2Error(
+                            f"{misses} unanswered keepalives within {SYNC_TIMEOUT}s")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -303,13 +324,27 @@ class H2Connection:
             await self.writer.drain()
 
     async def _reader_loop(self):
+        reader = self.reader
+        if reader is None:
+            return
         try:
             while True:
-                header = await self.reader.readexactly(9)
+                # A session that stops producing frames is treated as dead,
+                # otherwise the loop would wait here forever.
+                try:
+                    header = await asyncio.wait_for(reader.readexactly(9), timeout=IO_TIMEOUT)
+                except asyncio.TimeoutError:
+                    raise H2Error(f"read stalled for {IO_TIMEOUT}s")
                 length = int.from_bytes(header[:3], "big")
                 frame_type, flags = header[3], header[4]
                 stream_id = struct.unpack("!I", header[5:])[0] & 0x7FFFFFFF
-                payload = await self.reader.readexactly(length)
+                if length:
+                    try:
+                        payload = await asyncio.wait_for(reader.readexactly(length), timeout=IO_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        raise H2Error(f"incomplete frame (waited {IO_TIMEOUT}s)")
+                else:
+                    payload = b""
                 if frame_type == self.FRAME_SETTINGS:
                     if not flags & 1:
                         for offset in range(0, len(payload), 6):
@@ -323,8 +358,16 @@ class H2Connection:
                             elif setting == 5:
                                 self.max_frame_size = value
                         await self.send_frame(self.FRAME_SETTINGS, 1, 0)
-                elif frame_type == self.FRAME_PING and not flags & 1:
-                    await self.send_frame(self.FRAME_PING, 1, 0, payload)
+                elif frame_type == self.FRAME_PING:
+                    if flags & 1:
+                        # Reply to the keepalive we sent: only then do we know the
+                        # peer is really still on the other end.
+                        if (self.pending_keepalive is not None
+                                and payload == struct.pack("!Q", self.pending_keepalive)):
+                            self.pending_keepalive = None
+                            self.keepalive_acked.set()
+                    else:
+                        await self.send_frame(self.FRAME_PING, 1, 0, payload)
                 elif frame_type == self.FRAME_WINDOW_UPDATE:
                     increment = struct.unpack("!I", payload)[0] & 0x7FFFFFFF
                     if stream_id:
@@ -391,10 +434,10 @@ class H2Connection:
             await self.send_frame(self.FRAME_DATA, 0x01, stream_id)
 
     async def close(self):
-        background = tuple(task for task in (self.reader_task, self.ping_task)
+        background = tuple(task for task in (self.reader_task, self.keepalive_task)
                            if task and task is not asyncio.current_task())
         self.reader_task = None
-        self.ping_task = None
+        self.keepalive_task = None
         for task in background:
             task.cancel()
         if background:
