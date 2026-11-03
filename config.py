@@ -15,11 +15,11 @@ DNS_POISON_LOOPBACK = (os.environ.get("DNS_POISON_LOOPBACK") or "false").strip()
 INSECURE_TLS = (os.environ.get("INSECURE_TLS") or "false").strip().lower() in ("1", "true", "yes", "on")
 MAX_JOBS = max(1, int(os.environ.get("MAX_JOBS") or "8"))
 RECONNECT_COOLDOWN = max(60, int(os.environ.get("RECONNECT_COOLDOWN") or "300"))
-SYNC_INTERVAL = max(10, int(os.environ.get("SYNC_INTERVAL") or "20"))
+SYNC_INTERVAL = max(5, int(os.environ.get("SYNC_INTERVAL") or "10"))
 # How long to wait for the reply to a keepalive frame. A silently dropped TCP
 # connection never raises on write, so the reply is the only proof the peer is
 # still there.
-SYNC_TIMEOUT = max(15, int(os.environ.get("SYNC_TIMEOUT") or "40"))
+SYNC_TIMEOUT = max(8, int(os.environ.get("SYNC_TIMEOUT") or "15"))
 # Consecutive missed replies before the session is reset and reopened.
 SYNC_RETRIES = max(1, int(os.environ.get("SYNC_RETRIES") or "2"))
 # Abandon a read that produces nothing for this long.
@@ -28,7 +28,7 @@ RPC_TIMEOUT = float(os.environ.get("RPC_TIMEOUT") or "8")
 import ssl
 
 VERSION = "5.5.5"
-REPORT_INTERVAL = max(30, int(os.environ.get("REPORT_INTERVAL") or "45"))
+REPORT_INTERVAL = max(5, int(os.environ.get("REPORT_INTERVAL") or "10"))
 RETRY_WAIT = max(5, int(os.environ.get("RETRY_WAIT") or "10"))
 STABLE_SECS = max(30, int(os.environ.get("STABLE_SECS") or "60"))
 IP_PERIOD = 1800
